@@ -1,0 +1,6 @@
+# compiled binary
+tmux-nav
+
+# Go build cache
+*.test
+*.out
