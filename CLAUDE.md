@@ -28,7 +28,7 @@ The entire application is a single file: `main.go`. It uses the [Bubbletea](http
 - **`viewKanban`** — horizontal columns, one per repo group.
 - **`viewKanbanDrill`** — drill into one repo: three columns (Waiting / Running / Done) based on `AgentState`.
 
-Agent state (`AgentState` int) is read from the tmux pane option `@tap_state`, written by [tmux-tap](https://github.com/mirzajoldic/tmux-tap). The states are: `StateNone`, `StateRunning`, `StateThinking`, `StateDone`, `StateAsking`, `StatePlanReady`.
+Agent state (`AgentState` int) is read from the tmux pane option `@tap_state`, written by [tmux-tap](https://github.com/purplecones/tmux-tap). The states are: `StateNone`, `StateRunning`, `StateThinking`, `StateDone`, `StateAsking`, `StatePlanReady`.
 
 ### Key structs
 

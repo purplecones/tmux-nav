@@ -8,7 +8,7 @@ BINARY="$PLUGIN_DIR/tmux-nav"
 # ── Dependency check ──────────────────────────────────────────────────────────
 if [[ ! -d "${HOME}/.tmux-tap" ]]; then
   echo "[tmux-nav] WARNING: tmux-tap does not appear to be installed." >&2
-  echo "[tmux-nav] Add 'set -g @plugin mirzajoldic/tmux-tap' BEFORE tmux-nav in tmux.conf" >&2
+  echo "[tmux-nav] Add 'set -g @plugin purplecones/tmux-tap' BEFORE tmux-nav in tmux.conf" >&2
 fi
 
 # ── Build binary if missing or source is newer ────────────────────────────────

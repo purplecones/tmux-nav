@@ -1,20 +1,20 @@
 # tmux-nav
 
-A tmux popup navigator for agentic coding sessions. Groups panes by git repository and displays live agent state (running, waiting, plan ready, etc.) sourced from [tmux-tap](https://github.com/mirzajoldic/tmux-tap).
+A tmux popup navigator for agentic coding sessions. Groups panes by git repository and displays live agent state (running, waiting, plan ready, etc.) sourced from [tmux-tap](https://github.com/purplecones/tmux-tap).
 
 ## Requirements
 
 - tmux ≥ 3.0
 - Go ≥ 1.21 (for the build step on install)
-- [tmux-tap](https://github.com/mirzajoldic/tmux-tap) — must be listed before tmux-nav
+- [tmux-tap](https://github.com/purplecones/tmux-tap) — must be listed before tmux-nav
 
 ## Installation
 
 ### Via TPM (recommended)
 
 ```tmux
-set -g @plugin 'mirzajoldic/tmux-tap'
-set -g @plugin 'mirzajoldic/tmux-nav'
+set -g @plugin 'purplecones/tmux-tap'
+set -g @plugin 'purplecones/tmux-nav'
 ```
 
 Then `prefix + I` to install. The Go binary is built automatically on first load.
@@ -22,7 +22,7 @@ Then `prefix + I` to install. The Go binary is built automatically on first load
 ### Manual
 
 ```sh
-git clone https://github.com/mirzajoldic/tmux-nav ~/.tmux/plugins/tmux-nav
+git clone https://github.com/purplecones/tmux-nav ~/.tmux/plugins/tmux-nav
 cd ~/.tmux/plugins/tmux-nav && go build -o tmux-nav .
 ```
 
