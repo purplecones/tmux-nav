@@ -15,7 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const Version = "0.1.0"
+const Version = "0.2.0"
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
@@ -45,8 +45,9 @@ type Pane struct {
 	Dir     string
 	Title   string
 	Session string
-	Git   *GitInfo
-	Agent AgentState
+	Git    *GitInfo
+	Agent  AgentState
+	Unseen bool
 }
 
 type RepoGroup struct {
@@ -205,6 +206,7 @@ var (
 	styleStateDone      = lipgloss.NewStyle().Foreground(lipgloss.Color("71")).Bold(true)
 	styleStateAsking    = lipgloss.NewStyle().Foreground(lipgloss.Color("135")).Bold(true)
 	styleStatePlanReady = lipgloss.NewStyle().Foreground(lipgloss.Color("33")).Bold(true)
+	styleStateUnseen    = lipgloss.NewStyle().Foreground(lipgloss.Color("82")).Bold(true)
 	stylePreview       = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	styleDivider       = lipgloss.NewStyle().Foreground(lipgloss.Color("238"))
 )
@@ -513,6 +515,9 @@ func buildItems(groups []RepoGroup) []Item {
 					label += "  " + styleStateThinking.Render("◌ thinking")
 				case StateDone:
 					label += "  " + styleStateDone.Render("✓ done")
+					if p.Unseen {
+						label += " " + styleStateUnseen.Render("●")
+					}
 				case StateAsking:
 					label += "  " + styleStateAsking.Render("? choose")
 				case StatePlanReady:
@@ -643,6 +648,9 @@ type Model struct {
 	agentOnly bool
 	// grouping mode
 	grouping groupMode
+	// unseen tracking for done panes
+	unseen    map[string]bool       // pane IDs in StateDone not yet viewed
+	prevAgent map[string]AgentState // previous tick's agent state per pane ID
 }
 
 func (m Model) effectivePanes() []Pane {
@@ -679,6 +687,12 @@ func initialModel() Model {
 	panes, err := fetchAllPanes()
 	agentOnly := loadAgentOnly()
 
+	// Build initial prevAgent snapshot so panes already done at launch aren't flagged
+	prevAgent := make(map[string]AgentState, len(panes))
+	for _, p := range panes {
+		prevAgent[p.ID] = p.Agent
+	}
+
 	m := Model{
 		panes:     panes,
 		err:       err,
@@ -687,6 +701,8 @@ func initialModel() Model {
 		agentOnly: agentOnly,
 		grouping:  loadGroupMode(),
 		mode:      loadViewMode(),
+		unseen:    map[string]bool{},
+		prevAgent: prevAgent,
 	}
 
 	groups := m.groupPanes()
@@ -759,6 +775,38 @@ func (m *Model) softRefresh() {
 	if err != nil {
 		return
 	}
+
+	// Detect panes that just transitioned to StateDone
+	if m.prevAgent != nil {
+		for _, p := range panes {
+			prev, existed := m.prevAgent[p.ID]
+			if p.Agent == StateDone && (!existed || prev != StateDone) {
+				m.unseen[p.ID] = true
+			}
+			if p.Agent != StateDone {
+				delete(m.unseen, p.ID)
+			}
+		}
+	}
+
+	// Rebuild prevAgent snapshot for next tick
+	m.prevAgent = make(map[string]AgentState, len(panes))
+	for _, p := range panes {
+		m.prevAgent[p.ID] = p.Agent
+	}
+
+	// If active tmux pane is unseen, mark it as seen
+	if out, err2 := exec.Command("tmux", "display-message", "-p", "#{pane_id}").Output(); err2 == nil {
+		delete(m.unseen, strings.TrimSpace(string(out)))
+	}
+
+	// Stamp Unseen flag on panes
+	for i := range panes {
+		if m.unseen[panes[i].ID] {
+			panes[i].Unseen = true
+		}
+	}
+
 	m.panes = panes
 	groups := m.groupPanes()
 	m.items = buildItems(groups)
@@ -936,6 +984,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					col := m.drillCol
 					if len(cols[col]) > 0 {
 						target := cols[col][m.drillRow[col]].ID
+						delete(m.unseen, target)
 						exec.Command("tmux", "switch-client", "-t", target).Run()
 						return m, tea.Quit
 					}
@@ -1030,6 +1079,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							row := m.kanbanRow[key]
 							if row < len(g.Panes) {
 								target := g.Panes[row].ID
+								delete(m.unseen, target)
 								exec.Command("tmux", "switch-client", "-t", target).Run()
 								return m, tea.Quit
 							}
@@ -1109,6 +1159,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.refresh()
 			case "enter":
 				if target := m.currentTarget(); target != "" {
+					delete(m.unseen, target)
 					exec.Command("tmux", "switch-client", "-t", target).Run()
 					return m, tea.Quit
 				}
@@ -1404,7 +1455,11 @@ func renderKanbanCard(p Pane, colW int, selected bool) string {
 	case StateThinking:
 		parts = append(parts, styleStateThinking.Render("◌ thinking"))
 	case StateDone:
-		parts = append(parts, styleStateDone.Render("✓ done"))
+		done := styleStateDone.Render("✓ done")
+		if p.Unseen {
+			done += " " + styleStateUnseen.Render("●")
+		}
+		parts = append(parts, done)
 	case StateAsking:
 		parts = append(parts, styleStateAsking.Render("? choose"))
 	case StatePlanReady:
@@ -1450,7 +1505,11 @@ func renderDrillCard(p Pane, colW int, selected bool) string {
 	case StateThinking:
 		parts = append(parts, styleStateThinking.Render("◌ thinking"))
 	case StateDone:
-		parts = append(parts, styleStateDone.Render("✓ done"))
+		done := styleStateDone.Render("✓ done")
+		if p.Unseen {
+			done += " " + styleStateUnseen.Render("●")
+		}
+		parts = append(parts, done)
 	case StateAsking:
 		parts = append(parts, styleStateAsking.Render("? choose"))
 	case StatePlanReady:

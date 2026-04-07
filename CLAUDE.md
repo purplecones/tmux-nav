@@ -28,6 +28,14 @@ This project uses [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH)
 - **MINOR** (0.x.0) — new features, new view modes, new config options. Backward-compatible.
 - **MAJOR** (x.0.0) — breaking changes to config options, keybindings, or tmux option names.
 
+### Commit discipline
+
+Every commit that changes user-visible behavior **must** bump the version and update the changelog:
+
+1. Bump the `Version` constant in `main.go` according to the version bumping rules above.
+2. Add entries to `CHANGELOG.md` under `[Unreleased]`.
+3. Follow the release process (move Unreleased to a version heading, update links, tag).
+
 ### Changelog discipline
 
 All user-visible changes go in `CHANGELOG.md` under `[Unreleased]` using these categories: Added, Changed, Deprecated, Removed, Fixed, Security. Keep entries concise (one line each).
