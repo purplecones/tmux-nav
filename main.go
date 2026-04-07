@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const Version = "0.2.0"
+const Version = "0.3.0"
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
@@ -45,9 +46,10 @@ type Pane struct {
 	Dir     string
 	Title   string
 	Session string
-	Git    *GitInfo
-	Agent  AgentState
-	Unseen bool
+	Git        *GitInfo
+	Agent      AgentState
+	Unseen     bool
+	StateSince int64 // epoch seconds when current agent state was entered
 }
 
 type RepoGroup struct {
@@ -290,6 +292,24 @@ func parseAgentState(data []byte) AgentState {
 	}
 }
 
+func formatDuration(since int64) string {
+	if since <= 0 {
+		return ""
+	}
+	elapsed := time.Now().Unix() - since
+	if elapsed < 0 {
+		return ""
+	}
+	switch {
+	case elapsed >= 3600:
+		return fmt.Sprintf("%dh%dm", elapsed/3600, (elapsed%3600)/60)
+	case elapsed >= 60:
+		return fmt.Sprintf("%dm%ds", elapsed/60, elapsed%60)
+	default:
+		return fmt.Sprintf("%ds", elapsed)
+	}
+}
+
 // ── Tmux queries ──────────────────────────────────────────────────────────────
 
 func tmuxLines(args ...string) []string {
@@ -305,26 +325,31 @@ func tmuxLines(args ...string) []string {
 }
 
 func fetchAllPanes() ([]Pane, error) {
-	lines := tmuxLines("list-panes", "-a", "-F", "#{pane_id}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}|#{pane_title}|#{@tap_state}|#{session_name}")
+	lines := tmuxLines("list-panes", "-a", "-F", "#{pane_id}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}|#{pane_title}|#{@tap_state}|#{session_name}|#{@tap_state_since}")
 	if lines == nil {
 		return nil, fmt.Errorf("could not list panes")
 	}
 
 	var panes []Pane
 	for _, line := range lines {
-		parts := strings.SplitN(line, "|", 7)
+		parts := strings.SplitN(line, "|", 8)
 		if len(parts) < 7 {
 			continue
 		}
+		var since int64
+		if len(parts) >= 8 {
+			since, _ = strconv.ParseInt(strings.TrimSpace(parts[7]), 10, 64)
+		}
 		p := Pane{
-			ID:      parts[0],
-			PID:     parts[1],
-			Command: parts[2],
-			Dir:     parts[3],
-			Title:   parts[4],
-			Session: parts[6],
-			Git:     getGitInfo(parts[3]),
-			Agent:   parseAgentState([]byte(parts[5])),
+			ID:         parts[0],
+			PID:        parts[1],
+			Command:    parts[2],
+			Dir:        parts[3],
+			Title:      parts[4],
+			Session:    parts[6],
+			Git:        getGitInfo(parts[3]),
+			Agent:      parseAgentState([]byte(parts[5])),
+			StateSince: since,
 		}
 		panes = append(panes, p)
 	}
@@ -526,6 +551,10 @@ func buildItems(groups []RepoGroup) []Item {
 
 				if p.Title != "" && p.Title != p.Command {
 					label += "  " + styleLabel.Render(p.Title)
+				}
+
+				if dur := formatDuration(p.StateSince); dur != "" && p.Agent != StateNone {
+					label += "  " + styleLabel.Render(dur)
 				}
 
 				items = append(items, Item{
@@ -1465,6 +1494,9 @@ func renderKanbanCard(p Pane, colW int, selected bool) string {
 	case StatePlanReady:
 		parts = append(parts, styleStatePlanReady.Render("📋 plan ready"))
 	}
+	if dur := formatDuration(p.StateSince); dur != "" && p.Agent != StateNone {
+		parts = append(parts, styleLabel.Render(dur))
+	}
 	line2 := " "
 	if len(parts) > 0 {
 		line2 = mw.Render(strings.Join(parts, "  "))
@@ -1514,6 +1546,9 @@ func renderDrillCard(p Pane, colW int, selected bool) string {
 		parts = append(parts, styleStateAsking.Render("? choose"))
 	case StatePlanReady:
 		parts = append(parts, styleStatePlanReady.Render("📋 plan ready"))
+	}
+	if dur := formatDuration(p.StateSince); dur != "" && p.Agent != StateNone {
+		parts = append(parts, styleLabel.Render(dur))
 	}
 	line2 := " "
 	if len(parts) > 0 {
