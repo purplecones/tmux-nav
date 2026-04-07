@@ -10,6 +10,28 @@ go build -o tmux-nav .
 
 After any code change, rebuild and relaunch the navigator for changes to take effect. There are no tests.
 
+## Versioning and releases
+
+This project uses [Semantic Versioning](https://semver.org/) (MAJOR.MINOR.PATCH). The current version is defined as the `Version` constant in `main.go`.
+
+### When releasing a new version
+
+1. Update the `Version` constant in `main.go`.
+2. Move the `[Unreleased]` section in `CHANGELOG.md` under a new version heading with the date. Add a fresh `[Unreleased]` section above it. Update the comparison links at the bottom.
+3. Commit: `git commit -m "Release vX.Y.Z"`
+4. Tag: `git tag vX.Y.Z`
+5. Push: `git push origin main --tags`
+
+### Version bumping rules
+
+- **PATCH** (0.1.x) — bug fixes, cosmetic tweaks, no behavior change.
+- **MINOR** (0.x.0) — new features, new view modes, new config options. Backward-compatible.
+- **MAJOR** (x.0.0) — breaking changes to config options, keybindings, or tmux option names.
+
+### Changelog discipline
+
+All user-visible changes go in `CHANGELOG.md` under `[Unreleased]` using these categories: Added, Changed, Deprecated, Removed, Fixed, Security. Keep entries concise (one line each).
+
 ## Architecture
 
 The entire application is a single file: `main.go`. It uses the [Bubbletea](https://github.com/charmbracelet/bubbletea) TUI framework (Elm-style: Model / Update / View).

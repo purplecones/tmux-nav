@@ -15,6 +15,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+const Version = "0.1.0"
+
 // ── Data model ────────────────────────────────────────────────────────────────
 
 type GitInfo struct {
@@ -1644,6 +1646,10 @@ func (m Model) viewKanbanDrill() string {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println("tmux-nav " + Version)
+		return
+	}
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
