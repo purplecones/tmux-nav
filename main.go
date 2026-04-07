@@ -302,11 +302,11 @@ func formatDuration(since int64) string {
 	}
 	switch {
 	case elapsed >= 3600:
-		return fmt.Sprintf("%dh%dm", elapsed/3600, (elapsed%3600)/60)
+		return fmt.Sprintf("%dh", elapsed/3600)
 	case elapsed >= 60:
-		return fmt.Sprintf("%dm%ds", elapsed/60, elapsed%60)
+		return fmt.Sprintf("%dm", elapsed/60)
 	default:
-		return fmt.Sprintf("%ds", elapsed)
+		return "<1m"
 	}
 }
 
