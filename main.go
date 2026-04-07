@@ -42,6 +42,7 @@ type Pane struct {
 	Command string
 	Dir     string
 	Title   string
+	Session string
 	Git   *GitInfo
 	Agent AgentState
 }
@@ -84,6 +85,14 @@ const (
 	viewKanbanDrill          // drill-down: Waiting / Running / Done for one repo
 )
 
+type groupMode int
+
+const (
+	groupByProject groupMode = iota
+	groupByDir
+	groupBySession
+)
+
 const (
 	kanbanCardHeight  = 4  // 2 content lines + top/bottom border
 	drillCardHeight   = 5  // 3 content lines + top/bottom border
@@ -91,6 +100,84 @@ const (
 )
 
 var drillColNames = [3]string{"Waiting", "Running", "Done"}
+
+// ── Preferences persistence ──────────────────────────────────────────────────
+
+func prefsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "tmux-nav")
+}
+
+func loadGroupMode() groupMode {
+	data, err := os.ReadFile(filepath.Join(prefsDir(), "grouping"))
+	if err != nil {
+		return groupByProject
+	}
+	switch strings.TrimSpace(string(data)) {
+	case "directory":
+		return groupByDir
+	case "session":
+		return groupBySession
+	default:
+		return groupByProject
+	}
+}
+
+func saveGroupMode(g groupMode) {
+	dir := prefsDir()
+	os.MkdirAll(dir, 0o755)
+	var val string
+	switch g {
+	case groupByDir:
+		val = "directory"
+	case groupBySession:
+		val = "session"
+	default:
+		val = "project"
+	}
+	os.WriteFile(filepath.Join(dir, "grouping"), []byte(val+"\n"), 0o644)
+}
+
+func loadAgentOnly() bool {
+	data, err := os.ReadFile(filepath.Join(prefsDir(), "agent_only"))
+	if err != nil {
+		return true // default to agent-only
+	}
+	return strings.TrimSpace(string(data)) == "true"
+}
+
+func saveAgentOnly(v bool) {
+	dir := prefsDir()
+	os.MkdirAll(dir, 0o755)
+	val := "false"
+	if v {
+		val = "true"
+	}
+	os.WriteFile(filepath.Join(dir, "agent_only"), []byte(val+"\n"), 0o644)
+}
+
+func loadViewMode() viewMode {
+	data, err := os.ReadFile(filepath.Join(prefsDir(), "view_mode"))
+	if err != nil {
+		return viewList
+	}
+	switch strings.TrimSpace(string(data)) {
+	case "kanban":
+		return viewKanban
+	default:
+		return viewList
+	}
+}
+
+func saveViewMode(v viewMode) {
+	dir := prefsDir()
+	os.MkdirAll(dir, 0o755)
+	val := "list"
+	if v == viewKanban {
+		val = "kanban"
+	}
+	os.WriteFile(filepath.Join(dir, "view_mode"), []byte(val+"\n"), 0o644)
+}
 
 // repoKey returns a stable map key for a pane's repository.
 func repoKey(p Pane) string {
@@ -214,15 +301,15 @@ func tmuxLines(args ...string) []string {
 }
 
 func fetchAllPanes() ([]Pane, error) {
-	lines := tmuxLines("list-panes", "-a", "-F", "#{pane_id}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}|#{pane_title}|#{@tap_state}")
+	lines := tmuxLines("list-panes", "-a", "-F", "#{pane_id}|#{pane_pid}|#{pane_current_command}|#{pane_current_path}|#{pane_title}|#{@tap_state}|#{session_name}")
 	if lines == nil {
 		return nil, fmt.Errorf("could not list panes")
 	}
 
 	var panes []Pane
 	for _, line := range lines {
-		parts := strings.SplitN(line, "|", 6)
-		if len(parts) < 6 {
+		parts := strings.SplitN(line, "|", 7)
+		if len(parts) < 7 {
 			continue
 		}
 		p := Pane{
@@ -231,6 +318,7 @@ func fetchAllPanes() ([]Pane, error) {
 			Command: parts[2],
 			Dir:     parts[3],
 			Title:   parts[4],
+			Session: parts[6],
 			Git:     getGitInfo(parts[3]),
 			Agent:   parseAgentState([]byte(parts[5])),
 		}
@@ -284,6 +372,66 @@ func groupByRepo(panes []Pane) []RepoGroup {
 	if g, ok := groups["__no_repo__"]; ok {
 		result = append([]RepoGroup{*g}, result...)
 	}
+	return result
+}
+
+func groupByDirectory(panes []Pane) []RepoGroup {
+	var order []string
+	groups := map[string]*RepoGroup{}
+
+	for _, p := range panes {
+		key := p.Dir
+		if key == "" {
+			key = "__unknown__"
+		}
+		if _, exists := groups[key]; !exists {
+			name := shortDir(key)
+			if key == "__unknown__" {
+				name = "Unknown"
+			}
+			groups[key] = &RepoGroup{Name: name, Git: p.Git}
+			order = append(order, key)
+		}
+		groups[key].Panes = append(groups[key].Panes, p)
+	}
+
+	result := make([]RepoGroup, 0, len(order))
+	for _, key := range order {
+		result = append(result, *groups[key])
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+	return result
+}
+
+func groupBySessionName(panes []Pane) []RepoGroup {
+	var order []string
+	groups := map[string]*RepoGroup{}
+
+	for _, p := range panes {
+		key := p.Session
+		if key == "" {
+			key = "__no_session__"
+		}
+		if _, exists := groups[key]; !exists {
+			name := key
+			if key == "__no_session__" {
+				name = "No session"
+			}
+			groups[key] = &RepoGroup{Name: name, Git: p.Git}
+			order = append(order, key)
+		}
+		groups[key].Panes = append(groups[key].Panes, p)
+	}
+
+	result := make([]RepoGroup, 0, len(order))
+	for _, key := range order {
+		result = append(result, *groups[key])
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
 	return result
 }
 
@@ -450,6 +598,18 @@ func filteredRepos(repos []string, filter string) []string {
 	return result
 }
 
+// ── Pane filtering ────────────────────────────────────────────────────────
+
+func filterAgentPanes(panes []Pane) []Pane {
+	var out []Pane
+	for _, p := range panes {
+		if p.Agent != StateNone {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // ── Model ─────────────────────────────────────────────────────────────────────
 
 type Model struct {
@@ -477,29 +637,98 @@ type Model struct {
 	drillCol  int
 	drillRow  [3]int
 	drillOff  [3]int
+	// filter: show only panes with an active agent
+	agentOnly bool
+	// grouping mode
+	grouping groupMode
+}
+
+func (m Model) effectivePanes() []Pane {
+	if m.agentOnly {
+		return filterAgentPanes(m.panes)
+	}
+	return m.panes
+}
+
+func (m Model) groupPanes() []RepoGroup {
+	panes := m.effectivePanes()
+	switch m.grouping {
+	case groupByDir:
+		return groupByDirectory(panes)
+	case groupBySession:
+		return groupBySessionName(panes)
+	default:
+		return groupByRepo(panes)
+	}
+}
+
+func (m Model) groupModeLabel() string {
+	switch m.grouping {
+	case groupByDir:
+		return "directory"
+	case groupBySession:
+		return "session"
+	default:
+		return "project"
+	}
 }
 
 func initialModel() Model {
 	panes, err := fetchAllPanes()
-	groups := groupByRepo(panes)
-	items := buildItems(groups)
-
-	cursor := 0
-	for i, item := range items {
-		if item.Kind == KindPane {
-			cursor = i
-			break
-		}
-	}
+	agentOnly := loadAgentOnly()
 
 	m := Model{
-		items:     items,
 		panes:     panes,
-		cursor:    cursor,
 		err:       err,
 		kanbanRow: map[string]int{},
 		kanbanOff: map[string]int{},
+		agentOnly: agentOnly,
+		grouping:  loadGroupMode(),
+		mode:      loadViewMode(),
 	}
+
+	groups := m.groupPanes()
+	items := buildItems(groups)
+	m.items = items
+
+	// Highlight the pane from which tmux-nav was launched
+	activePaneID := ""
+	if out, err2 := exec.Command("tmux", "display-message", "-p", "#{pane_id}").Output(); err2 == nil {
+		activePaneID = strings.TrimSpace(string(out))
+	}
+	cursor := 0
+	found := false
+	for i, item := range items {
+		if item.Kind == KindPane && item.Target == activePaneID {
+			cursor = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		for i, item := range items {
+			if item.Kind == KindPane {
+				cursor = i
+				break
+			}
+		}
+	}
+	m.cursor = cursor
+
+	// Sync kanban cursors to the active pane
+	if activePaneID != "" {
+		for colIdx, g := range groups {
+			for rowIdx, p := range g.Panes {
+				if p.ID == activePaneID {
+					m.kanbanCol = colIdx
+					key := repoKey(p)
+					m.kanbanRow[key] = rowIdx
+					break
+				}
+			}
+		}
+	}
+
 	if cursor < len(items) {
 		m.preview = capturePane(items[cursor].Target)
 	}
@@ -529,7 +758,7 @@ func (m *Model) softRefresh() {
 		return
 	}
 	m.panes = panes
-	groups := groupByRepo(panes)
+	groups := m.groupPanes()
 	m.items = buildItems(groups)
 	if m.cursor >= len(m.items) {
 		m.cursor = max(0, len(m.items)-1)
@@ -548,7 +777,7 @@ func (m *Model) refresh() {
 	panes, err := fetchAllPanes()
 	m.err = err
 	m.panes = panes
-	groups := groupByRepo(panes)
+	groups := m.groupPanes()
 	m.items = buildItems(groups)
 	if m.cursor >= len(m.items) {
 		m.cursor = max(0, len(m.items)-1)
@@ -714,12 +943,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			// Kanban repo board key handling
 			if m.mode == viewKanban {
-				groups := groupByRepo(m.panes)
+				groups := m.groupPanes()
 				switch msg.String() {
 				case "q", "esc", "ctrl+c":
 					return m, tea.Quit
+				case "a":
+					m.agentOnly = !m.agentOnly
+					m.refresh()
+				case "g":
+					m.grouping = (m.grouping + 1) % 3
+					m.refresh()
 				case "b":
 					m.mode = viewList
+					saveViewMode(m.mode)
 					// sync list cursor to current kanban selection
 					if m.kanbanCol < len(groups) {
 						g := groups[m.kanbanCol]
@@ -807,10 +1043,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "b":
 				m.mode = viewKanban
+				saveViewMode(m.mode)
 				// sync kanban cursor to current list selection
 				if m.cursor < len(m.items) && m.items[m.cursor].Kind == KindPane {
 					target := m.items[m.cursor].Target
-					groups := groupByRepo(m.panes)
+					groups := m.groupPanes()
 					for ci, g := range groups {
 						for ri, p := range g.Panes {
 							if p.ID == target {
@@ -860,6 +1097,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ti.Width = 40
 				m.textInput = ti
 				m.state = statePickRepo
+			case "a":
+				m.agentOnly = !m.agentOnly
+				saveAgentOnly(m.agentOnly)
+				m.refresh()
+			case "g":
+				m.grouping = (m.grouping + 1) % 3
+				saveGroupMode(m.grouping)
+				m.refresh()
 			case "enter":
 				if target := m.currentTarget(); target != "" {
 					exec.Command("tmux", "switch-client", "-t", target).Run()
@@ -913,7 +1158,7 @@ func (m Model) View() string {
 	if m.state == stateConfirmKill {
 		helpBar = styleWarn.Render("  Kill this pane? (y/n)")
 	} else {
-		helpBar = styleHelp.Render("  j/k  navigate   enter  select   b  kanban   x  kill   w  new window   n  new session   t  new worktree   q  quit")
+		helpBar = styleHelp.Render("  j/k  navigate   enter  select   a  toggle agents   g  group by   b  kanban   x  kill   w  new window   n  new session   t  new worktree   q  quit")
 	}
 
 	return body + "\n" + helpBar
@@ -922,7 +1167,12 @@ func (m Model) View() string {
 func (m Model) renderLeft() string {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	sb.WriteString(styleTitle.Render("Tmux Navigator") + "\n\n")
+	title := "Tmux Navigator"
+	title += "  " + styleLabel.Render("[by "+m.groupModeLabel()+"]")
+	if m.agentOnly {
+		title += "  " + styleLabel.Render("[agents only]")
+	}
+	sb.WriteString(styleTitle.Render(title) + "\n\n")
 
 	maxW := m.width/2 - 1
 	end := min(m.offset+m.listHeight(), len(m.items))
@@ -1034,7 +1284,7 @@ func (m *Model) clampKanbanCursor() {
 		m.kanbanRow = map[string]int{}
 		m.kanbanOff = map[string]int{}
 	}
-	groups := groupByRepo(m.panes)
+	groups := m.groupPanes()
 	if len(groups) == 0 {
 		m.kanbanCol = 0
 		m.kanbanColOff = 0
@@ -1081,7 +1331,7 @@ func (m *Model) clampKanbanCursor() {
 
 func (m Model) drillPanes() [3][]Pane {
 	var cols [3][]Pane
-	for _, p := range m.panes {
+	for _, p := range m.effectivePanes() {
 		if repoKey(p) == m.drillRepo {
 			var col int
 			switch p.Agent {
@@ -1304,7 +1554,7 @@ func (m Model) viewKanban() string {
 	if m.width == 0 {
 		return ""
 	}
-	groups := groupByRepo(m.panes)
+	groups := m.groupPanes()
 	if len(groups) == 0 {
 		return styleLabel.Render("\n  No panes found.\n") + "\n" +
 			styleHelp.Render("  b  list view   q  quit")
@@ -1313,7 +1563,12 @@ func (m Model) viewKanban() string {
 	nVis := m.kanbanNumVisible()
 	colW := m.kanbanColWidth()
 
-	titleStr := styleTitle.Render("Kanban Board")
+	kanbanTitle := "Kanban Board"
+	kanbanTitle += "  " + styleLabel.Render("[by "+m.groupModeLabel()+"]")
+	if m.agentOnly {
+		kanbanTitle += "  " + styleLabel.Render("[agents only]")
+	}
+	titleStr := styleTitle.Render(kanbanTitle)
 	if m.kanbanColOff > 0 {
 		titleStr += "  " + styleDivider.Render("◀ more")
 	}
@@ -1343,7 +1598,7 @@ func (m Model) viewKanban() string {
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, parts...)
 
-	helpBar := styleHelp.Render("  h/l  column   j/k  card   tab  drill in   enter  select   b  list view   q  quit")
+	helpBar := styleHelp.Render("  h/l  column   j/k  card   tab  drill in   enter  select   a  toggle agents   g  group by   b  list view   q  quit")
 	return titleStr + "\n" + body + "\n" + helpBar
 }
 
@@ -1353,7 +1608,7 @@ func (m Model) viewKanbanDrill() string {
 	}
 
 	repoDisplayName := "No project"
-	for _, p := range m.panes {
+	for _, p := range m.effectivePanes() {
 		if repoKey(p) == m.drillRepo {
 			if p.Git != nil {
 				repoDisplayName = p.Git.Name + gitTag(p.Git)

@@ -26,6 +26,15 @@ if [[ ! -x "$BINARY" ]] || [[ "$PLUGIN_DIR/main.go" -nt "$BINARY" ]]; then
   fi
 fi
 
+# ── Pane border titles with agent-state coloring ─────────────────────────────
+# Colors pane borders based on @tap_state set by tmux-tap:
+#   running → orange, thinking → yellow, done → green,
+#   asking → purple, plan_ready → blue
+tmux set-option -g pane-border-status top
+tmux set-option -g pane-border-format "#{?#{==:#{@tap_state},running},#[bg=colour208 fg=black],#{?#{==:#{@tap_state},thinking},#[bg=colour214 fg=black],#{?#{==:#{@tap_state},done},#[bg=colour71 fg=black],#{?#{==:#{@tap_state},asking},#[bg=colour135 fg=white],#{?#{==:#{@tap_state},plan_ready},#[bg=colour33 fg=white],}}}}} #{?#{pane_title},#{pane_title},#{b:pane_current_path}} #[default]"
+tmux set-option -g pane-border-style fg=grey
+tmux set-option -g pane-active-border-style fg=green
+
 # ── Register keybinding ───────────────────────────────────────────────────────
 KEY=$(tmux show-options -gqv "@tmux_nav_key" 2>/dev/null)
 KEY="${KEY:-s}"
